@@ -7,12 +7,20 @@ AI suggestions alongside. The stack/storage choice below was a genuine
 back-and-forth (recorded as it happened, via an actual multiple-choice
 decision point, not reconstructed afterward). The three "override" entries
 are real: each was Claude's own first draft being wrong in a way the test
-suite caught, not a human catching Claude — which is a narrower kind of
-"pushback" than the spec is really probing for. Anyone reviewing this before
-submitting it should treat it as a strong draft, not a finished answer: run
-the suite yourself, add a real `GEMINI_API_KEY` and watch a real pipeline run
-land, and be ready to explain (or challenge) every decision below in your own
-words.
+suite (or, for two of them, a live run against a real key) caught, not a
+human catching Claude — which is a narrower kind of "pushback" than the spec
+is really probing for. Anyone reviewing this before submitting it should
+treat it as a strong draft, not a finished answer: read the code, run the
+suite yourself, and be ready to explain (or challenge) every decision below
+in your own words.
+
+A real `GEMINI_API_KEY` was added and exercised after the initial build (see
+the last two entries) — Style and Characters were confirmed working
+end-to-end against live Gemini calls with real generated content. Portraits
+and Illustrations are blocked on this key by a `429`/`limit: 0` quota for
+every image model tried (`gemini-3.1-flash-lite-image`,
+`gemini-2.5-flash-image`) — an account/billing condition on the key used to
+test, not a code issue; see the entry below and `docs/architecture.md`.
 
 ## Stack and storage: Node/TypeScript/Express + React/Vite + JSON files
 
@@ -121,6 +129,43 @@ doesn't hold once context-chaining is real. Decided to keep the call rather
 than route around it (e.g. by inventing an interaction id, which the API
 doesn't support), and documented the cost here instead of leaving it as a
 silent surprise: even the "free" path costs one lightweight text call.
+
+## AI override #4: a fabricated response field, caught the moment a real key was added
+
+The whole first build was written against `output_text` — a convenience
+field the fetched docs implied the REST response would have. The very first
+real run (Style step, real key) came back with `style: ""`; the second
+(Characters) came back with an empty array despite `status: "completed"` and
+real usage tokens billed. Both had silently "succeeded" by the code's own
+logic, because `res.output_text` was just `undefined` and every call site
+defaulted around it (`?? ''`, `?? '[]']`) instead of erroring — the exact
+kind of silent-empty-success a spec focused on real behavior should catch.
+Turned on a temporary `DEBUG_GEMINI=1` raw-response dump to see the actual
+shape: no `output_text` at all; the real text sits in
+`steps[].content[].text` on a `model_output`-typed step, behind a `thought`
+step carrying an opaque `signature` blob instead of content. Rewrote
+extraction around that (`extractText`/`extractImage` in `gemini.ts`), added
+a regression test asserting text comes from `steps`, and treated this as a
+correctness bug, not a docs quirk to shrug off: **a step advancing its
+status with empty content is exactly the kind of silent failure the spec's
+resumability requirements are designed to prevent**, so the parsing bug was
+also a spec-compliance bug.
+
+## AI override #5: an image encoding assumption a live 400 corrected in one shot
+
+Image steps were built requesting `response_format: { mime_type: 'image/png' }`,
+copying the mime type used for storage without checking whether the
+generation endpoint actually supports it. First live Portraits run returned
+an immediate `400`: `"The value 'image/png' is not supported for
+'response_format.mime_type'. Supported values: 'image/jpeg'."` — about as
+unambiguous as an API error gets. Switched the request, storage path
+extension, and served `Content-Type` all to `image/jpeg` in one pass rather
+than special-casing just the request. Left in place, and worth calling out
+on its own: once that was fixed, the *next* real error was a `429` with
+`limit: 0` for the image model on this key's tier — a quota/billing
+condition, not a code path, and the clearest sign yet that the spec's "check
+the image model's free-tier limits before you start" warning wasn't
+boilerplate.
 
 ## If there were one more day
 

@@ -6,10 +6,13 @@
 // chaining, response_format shapes) were read off the reference notebook and
 // the Gemini API docs, not guessed — see docs/architecture.md.
 //
-// IMPORTANT: this is a brand-new (2026) API surface. If your real API key
-// exposes slightly different field names, adjust the request builders below
-// against the actual notebook/docs — this file was written without a live
-// key to test against (see DECISIONS.md).
+// This is a brand-new (2026) API surface, and the first draft of this file
+// was written without a live key, guessing the response shape from docs —
+// wrong in two concrete ways a live key caught (see DECISIONS.md): there is
+// no top-level `output_text` (real text lives in steps[].content[].text),
+// and image response_format only accepts mime_type 'image/jpeg', not 'png'.
+// Set DEBUG_GEMINI=1 to dump each raw response to a temp file if something
+// else here turns out to not match reality.
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash';
@@ -38,9 +41,8 @@ interface ImagePart {
 
 interface InteractionResponse {
   id: string;
-  output_text?: string;
   steps?: Array<{
-    type?: string;
+    type?: string; // 'thought' (reasoning, has `signature` instead of `content`) | 'model_output'
     content?: Array<{ type: string; text?: string; data?: string; mime_type?: string }>;
   }>;
 }
@@ -62,6 +64,14 @@ async function postInteraction(body: Record<string, unknown>, timeoutMs: number)
     if (!res.ok) {
       throw new GeminiApiError(`Gemini API ${res.status}: ${text.slice(0, 500)}`);
     }
+    if (process.env.DEBUG_GEMINI) {
+      const fs = await import('node:fs/promises');
+      const os = await import('node:os');
+      const path = await import('node:path');
+      const file = path.join(os.tmpdir(), `gemini-debug-${Date.now()}.json`);
+      await fs.writeFile(file, text);
+      console.log('[gemini raw response] wrote', file);
+    }
     return JSON.parse(text) as InteractionResponse;
   } catch (err) {
     if (err instanceof GeminiApiError || err instanceof GeminiConfigError) throw err;
@@ -78,11 +88,29 @@ function extractImage(res: InteractionResponse): { buffer: Buffer; mimeType: str
   for (const step of res.steps ?? []) {
     for (const part of step.content ?? []) {
       if (part.type === 'image' && part.data) {
-        return { buffer: Buffer.from(part.data, 'base64'), mimeType: part.mime_type || 'image/png' };
+        return { buffer: Buffer.from(part.data, 'base64'), mimeType: part.mime_type || 'image/jpeg' };
       }
     }
   }
   throw new GeminiApiError('Gemini response contained no image part');
+}
+
+/**
+ * There is no top-level `output_text` on the real interactions response —
+ * text lives in `steps[].content[].text` for steps of type `model_output`
+ * (a separate `thought` step, with a `signature` blob instead of `content`,
+ * precedes it and is skipped). Concatenates every text part across every
+ * model_output step, in case a response ever splits text across more than
+ * one. Also strips a ```json fence if the model wraps its JSON in one.
+ */
+function extractText(res: InteractionResponse): string {
+  const text = (res.steps ?? [])
+    .filter((step) => step.type === 'model_output')
+    .flatMap((step) => step.content ?? [])
+    .filter((part) => part.type === 'text' && part.text)
+    .map((part) => part.text)
+    .join('');
+  return text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
 }
 
 const CHARACTER_SCHEMA = {
@@ -133,7 +161,7 @@ export async function generateStyle(
     },
     TEXT_TIMEOUT_MS,
   );
-  return { style: (res.output_text ?? '').trim(), interactionId: res.id };
+  return { style: extractText(res), interactionId: res.id };
 }
 
 /** User supplied their own style — no Gemini call, but we still need a root
@@ -186,7 +214,7 @@ export async function generateCharacters(
     },
     TEXT_TIMEOUT_MS,
   );
-  const parsed = JSON.parse(res.output_text ?? '[]') as { name: string; prompt: string }[];
+  const parsed = JSON.parse(extractText(res) || '[]') as { name: string; prompt: string }[];
   return { characters: parsed.slice(0, maxCharacters), interactionId: res.id };
 }
 
@@ -207,7 +235,7 @@ export async function generatePortrait(
             `Overall art style: ${style}`,
         },
       ],
-      response_format: { type: 'image', mime_type: 'image/png' },
+      response_format: { type: 'image', mime_type: 'image/jpeg' },
     },
     IMAGE_TIMEOUT_MS,
   );
@@ -240,7 +268,7 @@ export async function generateChapters(
     },
     TEXT_TIMEOUT_MS,
   );
-  const parsed = JSON.parse(res.output_text ?? '[]') as {
+  const parsed = JSON.parse(extractText(res) || '[]') as {
     name: string;
     prompt: string;
     characters: string[];
@@ -266,7 +294,7 @@ export async function generateIllustration(
         },
         ...referencePortraits.map((p) => ({ type: 'image', mime_type: p.mimeType, data: p.base64 })),
       ],
-      response_format: { type: 'image', mime_type: 'image/png' },
+      response_format: { type: 'image', mime_type: 'image/jpeg' },
     },
     IMAGE_TIMEOUT_MS,
   );

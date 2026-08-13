@@ -28,8 +28,14 @@ Request body shape:
 }
 ```
 
-Response is an `Interaction` object: `{ id, output_text, steps: [...] }`, with
-image bytes recovered from `steps[].content[].data` (base64) for image calls.
+Response is an `Interaction` object: `{ id, status, usage, steps: [...] }`.
+There is **no top-level `output_text`** — confirmed against a live key after
+an earlier draft assumed one (see DECISIONS.md). `steps` holds a `thought`
+entry (reasoning, carries a `signature` blob instead of `content`) followed
+by a `model_output` entry whose `content` array is where the real payload
+lives: `{ type: 'text', text: '...' }` for text/JSON responses, or
+`{ type: 'image', data: '<base64>', mime_type: '...' }` for image responses.
+`gemini.ts#extractText`/`#extractImage` pull from there.
 
 Mapped onto the 5 steps (`server/src/lib/gemini.ts`):
 
@@ -40,6 +46,14 @@ Mapped onto the 5 steps (`server/src/lib/gemini.ts`):
 | Portraits | image | one call per character, each chained off the previous for style consistency | previous portrait's interaction |
 | Chapters | text | `response_format` JSON schema, max 1 | characters interaction |
 | Illustrations | image | chapter prompt + each referenced character's portrait bytes as image input parts | — (consistency via literal image inputs, not chaining) |
+
+Image calls request `response_format: { type: 'image', mime_type: 'image/jpeg' }`
+— confirmed live that `image/png` is rejected with a 400
+(`"Supported values: 'image/jpeg'"`); generated images are stored and served
+as `.jpg`. The image model itself needs a paid/billing-enabled tier — a free
+key can return a `429` with `limit: 0` for every image model tried, which is
+an account/quota condition, not a bug (see `DECISIONS.md`; the spec's own
+hint that image limits are tighter than text held up in practice).
 
 The book's text is sent **once**, in the Style step's call. Every step after
 that references `previous_interaction_id` (or, for illustrations, the

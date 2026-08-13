@@ -13,7 +13,7 @@ vi.mock('../gemini.js', () => ({
   })),
   generatePortrait: vi.fn(async () => ({
     buffer: Buffer.from('fake-png'),
-    mimeType: 'image/png',
+    mimeType: 'image/jpeg',
     interactionId: 'portrait-1',
   })),
   generateChapters: vi.fn(async (_charsId: string, max: number) => ({
@@ -26,7 +26,7 @@ vi.mock('../gemini.js', () => ({
   })),
   generateIllustration: vi.fn(async () => ({
     buffer: Buffer.from('fake-illustration'),
-    mimeType: 'image/png',
+    mimeType: 'image/jpeg',
     interactionId: 'illustration-1',
   })),
 }));

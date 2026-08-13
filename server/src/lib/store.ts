@@ -37,12 +37,12 @@ export function bookTextPath(id: string) {
   return path.join(projectDir(id), 'book.txt');
 }
 export function portraitPath(id: string, index: number) {
-  return path.join(projectDir(id), 'portraits', `${index}.png`);
+  return path.join(projectDir(id), 'portraits', `${index}.jpg`);
 }
 export function chapterImagePath(id: string, index: number) {
-  return path.join(projectDir(id), 'chapters', `${index}.png`);
+  return path.join(projectDir(id), 'chapters', `${index}.jpg`);
 }
-/** Resolve a relative path stored on a Character/Chapter record (e.g. "portraits/0.png") to an absolute one. */
+/** Resolve a relative path stored on a Character/Chapter record (e.g. "portraits/0.jpg") to an absolute one. */
 export function projectFilePath(id: string, relPath: string) {
   return path.join(projectDir(id), relPath);
 }

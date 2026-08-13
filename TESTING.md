@@ -47,11 +47,16 @@ HTTP in a component test.
 ## Deliberately not tested
 
 - **E2E** — explicitly not expected per the spec.
-- **Real Gemini calls** — every test mocks the client/`fetch`; nothing here
-  burns quota, and nothing here can tell you the actual REST shape is
-  correct against a live key (see `DECISIONS.md` for why that mapping was
-  done carefully from the notebook/docs instead, but it's still unverified
-  against a real key as of this writing).
+- **Real Gemini calls in the automated suite** — every automated test mocks
+  the client/`fetch`; nothing there burns quota. A real key *was* exercised
+  manually afterward (not as part of `./test.sh`): it caught two real bugs
+  in the initial REST-shape mapping (a nonexistent `output_text` field, and
+  `image/png` being rejected in favor of `image/jpeg`), both fixed and
+  covered by a regression test in `gemini.test.ts`. Style and Characters are
+  confirmed working end-to-end against live Gemini calls; Portraits and
+  Illustrations are blocked on the key used for testing by a `429`/quota-0
+  response for every image model tried — see `DECISIONS.md` and
+  `docs/architecture.md`.
 - **The Express routes layer directly** (supertest against `index.ts`) —
   the pipeline logic underneath is tested, and the routes are thin
   pass-throughs to it, but a routes-level integration test would catch a

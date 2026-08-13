@@ -23,7 +23,7 @@ filesRouter.get('/:projectId/:kind(portraits|chapters)/:index', async (req, res)
   }
   try {
     const buf = await readImage(projectFilePath(project.id, relPath));
-    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
     res.send(buf);
   } catch {

@@ -161,7 +161,7 @@ async function runPortraitsStep(id: string) {
     );
     previousInteractionId = interactionId;
 
-    const relPath = `portraits/${i}.png`;
+    const relPath = `portraits/${i}.jpg`;
     await saveImage(portraitPath(id, i), buffer);
     await updateProject(id, (p) => {
       const characters = [...p.characters];
@@ -226,7 +226,7 @@ async function runIllustrationsStep(id: string) {
 
     const referencePortraits = await Promise.all(
       matched.map(async (c) => ({
-        mimeType: 'image/png',
+        mimeType: 'image/jpeg',
         base64: (await readImage(projectFilePath(id, c.portraitPath as string))).toString('base64'),
       })),
     );
@@ -237,7 +237,7 @@ async function runIllustrationsStep(id: string) {
       referencePortraits,
     );
 
-    const relPath = `chapters/${i}.png`;
+    const relPath = `chapters/${i}.jpg`;
     await saveImage(chapterImagePath(id, i), buffer);
     await updateProject(id, (p) => {
       const chapters = [...p.chapters];
