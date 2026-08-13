@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+
+# runtime data: book text, generated images, users/projects JSON — never committed
+server/data/
+
+# env files with real secrets
+.env
+.env.local
+!*.env.example
+
+# editor/OS noise
+.DS_Store
+*.log
+.vscode/
+!.vscode/extensions.json
