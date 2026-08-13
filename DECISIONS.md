@@ -42,9 +42,6 @@ below) — good enough at "one project's data, one project's disk footprint"
 scale, not something to carry forward if this grew to multiple concurrent
 users writing the same project.
 
-*Where:* `server/src/lib/store.ts` end to end; commit `98bbd74` (scaffold)
-and `96815cd` (storage layer) for how it was set up.
-
 ## Two fields for pipeline progress, not one
 
 `status` (`CREATED` → ... → `DONE`) tracks which steps have **completed**;
@@ -63,12 +60,6 @@ in the same write) rather than one column a state library could validate
 transitions on. At five fixed steps this is small enough to keep as plain
 object spreads in `pipeline.ts`; it would be the first thing to reconsider
 if the step count became dynamic.
-
-*Where:* the fields themselves: `server/src/lib/types.ts` (`ProjectStatus`,
-`StepState`). The consistency rule in practice: every `updateProject` call in
-`server/src/lib/pipeline.ts` that sets `status` also resets `stepState` in
-the same object literal (e.g. `runStyleStep`, `runCharactersStep`). Commit
-`96815cd` (types) and `f7fcc76` (pipeline).
 
 ## Duplicate-call guard: an in-memory set, not a stale-after-N-seconds timeout
 
@@ -93,14 +84,6 @@ running a step. Fine at "one server process" scale; would need a
 cross-process lock (e.g. a lock row in a real DB, or a file lock) the moment
 it wasn't.
 
-*Where:* the `runningJobs` set and the synchronous check-and-set in
-`startStep()` — `server/src/lib/pipeline.ts:30-64` (as of commit `f7fcc76`,
-which introduced this file). `isOrphanedRunning()` in the same file computes
-the "stuck" flag consumed by `server/src/routes/projects.ts`'s `summarize`/
-`serializeDetail` helpers (commit `1adab07`). Tested in
-`server/src/lib/__tests__/pipeline.test.ts`, `describe('duplicate-call
-guard')` and `describe('orphan / stuck-step recovery')`.
-
 ## AI override #1: the Windows file-rename race the test suite caught
 
 First implementation of atomic writes (`store.ts`) did the standard
@@ -119,17 +102,6 @@ full-suite runs afterward. Left the retry-with-backoff in `atomicWriteFile`
 too, as a second line of defense against anything external (antivirus,
 an editor) that might briefly hold the file open.
 
-*Where:* `server/src/lib/store.ts` — the fix is `readProject()` at line 170
-now routing through `withLock` instead of calling `fs.readFile` directly;
-the belt-and-suspenders retry is `atomicWriteFile()` at line 58. Both
-landed in the same commit as the storage layer itself, `96815cd` — this
-was found and fixed before the first commit existed, so there's no
-separate "broken" commit to diff against; the flakiness and the fix are
-described here instead. The regression coverage is the concurrent-write
-test in `server/src/lib/__tests__/store.test.ts` (`'serializes concurrent
-updateProject calls instead of losing writes'`), which is what actually
-exposed the `EPERM`s in the first place.
-
 ## AI override #2: a config error being silently mislabeled as an API error
 
 `gemini.ts`'s error handling originally treated any thrown error inside the
@@ -145,16 +117,6 @@ GEMINI_API_KEY is not set" misfiled under a banner that reads like a
 transient failure worth retrying — retrying it changes nothing until the
 key is actually added.
 
-*Where:* `server/src/lib/gemini.ts` — `GeminiConfigError`/`GeminiApiError`
-class declarations at lines 24-25, the `apiKey()` guard at line 30, and the
-fix itself at line 77 (`if (err instanceof GeminiApiError || err instanceof
-GeminiConfigError) throw err;` — checking for both types, not just
-`GeminiApiError`, before the generic wrap below it). Landed already-fixed
-in commit `8e99509` (same reasoning as the EPERM entry: caught by
-`server/src/lib/__tests__/gemini.test.ts`'s `'throws a clear config error
-when GEMINI_API_KEY is missing'` test before any commit existed). That
-exact test is the regression guard.
-
 ## AI override #3: a manual end-to-end smoke test surfaced an unstated cost
 
 Running the actual API by hand (curl, no automated test) to sanity-check
@@ -167,15 +129,6 @@ doesn't hold once context-chaining is real. Decided to keep the call rather
 than route around it (e.g. by inventing an interaction id, which the API
 doesn't support), and documented the cost here instead of leaving it as a
 silent surprise: even the "free" path costs one lightweight text call.
-
-*Where:* `server/src/lib/gemini.ts:169` — `seedRootInteraction()`, the
-function that makes this call. Called from `runStyleStep()` in
-`server/src/lib/pipeline.ts` (the branch taken when `userStyle` is
-provided). Both landed in their introducing commits (`8e99509` for
-`gemini.ts`, `f7fcc76` for `pipeline.ts`) already doing this — the
-smoke test that surfaced it as worth documenting was a manual `curl`
-sequence against the real API, run from this conversation, not a file
-in the repo.
 
 ## AI override #4: a fabricated response field, caught the moment a real key was added
 
@@ -198,19 +151,6 @@ status with empty content is exactly the kind of silent failure the spec's
 resumability requirements are designed to prevent**, so the parsing bug was
 also a spec-compliance bug.
 
-*Where:* fix commit `1f29630`. `extractText()` in
-`server/src/lib/gemini.ts:106` replaces every prior use of
-`res.output_text`; `extractImage()` a few lines above it in the same file
-was already scanning `steps[].content[]` and needed no change. The
-regression test is `server/src/lib/__tests__/gemini.test.ts`, `describe('generateStyle')
-> 'extracts plain text from the model_output step, not a nonexistent
-output_text field'`, backed by the `modelOutputResponse()` fixture at the
-top of that file (mirrors the real shape: a `thought` step then a
-`model_output` step). The corrected shape is written up in
-`docs/architecture.md`'s "Pipeline mechanics" section. The `DEBUG_GEMINI=1`
-dump mentioned above is the `if (process.env.DEBUG_GEMINI)` block in
-`postInteraction()`, `server/src/lib/gemini.ts` around line 68.
-
 ## AI override #5: an image encoding assumption a live 400 corrected in one shot
 
 Image steps were built requesting `response_format: { mime_type: 'image/png' }`,
@@ -226,18 +166,6 @@ on its own: once that was fixed, the *next* real error was a `429` with
 condition, not a code path, and the clearest sign yet that the spec's "check
 the image model's free-tier limits before you start" warning wasn't
 boilerplate.
-
-*Where:* fix commit `1f29630`, same commit as override #4 above (both were
-found in the same live-key debugging session). `mime_type: 'image/jpeg'` at
-`server/src/lib/gemini.ts:238` (`generatePortrait`) and `:297`
-(`generateIllustration`); storage/serving followed suit in
-`server/src/lib/store.ts` (`portraitPath`/`chapterImagePath`, now `.jpg`)
-and `server/src/routes/files.ts` (`Content-Type: image/jpeg`). No automated
-test covers the exact mime-type string (that would require a live call to
-verify against); this is documented here and in `docs/architecture.md`
-instead, and the account-level `429`/quota-0 blocker that surfaced right
-after is the reason Portraits/Illustrations still aren't verified past this
-point as of this writing.
 
 ## If there were one more day
 
