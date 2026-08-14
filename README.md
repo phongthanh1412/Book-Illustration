@@ -80,7 +80,9 @@ using the default ports):
 
 Full write-up: `docs/architecture.md`. Planning notes from before any code was
 written: `docs/plan.md`. AI-assisted decisions and where they were overridden:
-`DECISIONS.md`.
+`DECISIONS.md`. No `.claude/` directory: no custom slash commands, hooks, or
+settings were used beyond `CLAUDE.md` itself, so there's nothing there to
+commit.
 
 ## Project layout
 
