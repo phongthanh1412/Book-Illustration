@@ -22,6 +22,78 @@ every image model tried (`gemini-3.1-flash-lite-image`,
 `gemini-2.5-flash-image`) — an account/billing condition on the key used to
 test, not a code issue; see the entry below and `docs/architecture.md`.
 
+**At a glance** — 3 design decisions, 5 AI overrides (≥3 required by §2.3),
+plus the quota writeup and the one-more-day answer:
+
+- [Stack and storage: Node/TS/Express + React/Vite + JSON files](#stack-and-storage-nodetypescriptexpress--reactvite--json-files)
+- [Two fields for pipeline progress, not one](#two-fields-for-pipeline-progress-not-one)
+- [Duplicate-call guard: an in-memory set, not a timeout](#duplicate-call-guard-an-in-memory-set-not-a-stale-after-n-seconds-timeout)
+- [AI override #1 — Windows file-rename race](#ai-override-1-the-windows-file-rename-race-the-test-suite-caught)
+- [AI override #2 — config error mislabeled as API error](#ai-override-2-a-config-error-being-silently-mislabeled-as-an-api-error)
+- [AI override #3 — user style still costs a Gemini call](#ai-override-3-a-manual-end-to-end-smoke-test-surfaced-an-unstated-cost)
+- [AI override #4 — fabricated `output_text` field](#ai-override-4-a-fabricated-response-field-caught-the-moment-a-real-key-was-added)
+- [AI override #5 — wrong image mime type](#ai-override-5-an-image-encoding-assumption-a-live-400-corrected-in-one-shot)
+- [Proof the pipeline is correct despite the image-model quota block](#proof-the-pipeline-is-correct-despite-the-image-model-quota-block)
+- [If there were one more day](#if-there-were-one-more-day)
+
+## Proof the pipeline is correct despite the image-model quota block
+
+The `429`/`limit: 0` on every image model (see above) blocks Portraits and
+Illustrations end-to-end, but it's a billing/quota condition on the key
+used to test — not something the pipeline logic can be blamed for. Two
+independent pieces of evidence separate "the code is wrong" from "the key
+has no image quota":
+
+1. **Pipeline logic, proven without touching the network.**
+   `server/src/lib/__tests__/pipeline.test.ts` mocks every function in
+   `gemini.ts` (real book text and Gemini API key not required) and drives
+   `startStep()` — the actual function the HTTP route calls — through all
+   five steps for real:
+
+   ```bash
+   npm test -w server -- pipeline.test.ts
+   ```
+
+   The `happy path style -> characters -> portraits -> chapters ->
+   illustrations` test (lines 58-85) asserts `status` lands on
+   `PORTRAITS_GENERATED`, `CHAPTERS_GENERATED`, then `DONE`, that the
+   character/chapter caps hold (`toHaveLength(2)` / `toHaveLength(1)`), and
+   that every portrait/illustration status flips to `done` — using a fake
+   `Buffer.from('fake-png')` in place of a real image. The other six tests
+   in the same file cover the duplicate-call guard, step-order enforcement,
+   and orphan/stuck-step retry. All seven pass with no `GEMINI_API_KEY` set
+   and no network access:
+
+   ```
+   ✓ src/lib/__tests__/pipeline.test.ts (7 tests) 368ms
+     Test Files  1 passed (1)
+     Tests       7 passed (7)
+   ```
+
+2. **Live proof for the two steps quota didn't block.** Style and
+   Characters ran end-to-end against the real key with real generated
+   content (style text, two named characters) before Portraits hit the
+   `429`. That rules out the request/response parsing being the problem for
+   those two calls — the same `postInteraction`/`extractText` path
+   Portraits and Illustrations also use.
+
+**Billing was attempted and couldn't be resolved before submission.** Fixing
+the `429` requires attaching real billing to the key's Cloud project;
+Google's billing setup rejected every virtual/prepaid card tried, and no
+physical card was available in time. Routing around it via Imagen was
+considered and rejected — it's being shut down by Google on 2026-08-17 and
+isn't the Nano Banana-family model the spec (§5.3) calls for. Left as an
+accepted gap: verified correct by the mocked test above, not by a real
+generated image.
+
+Screenshot evidence (Portraits stuck on the real quota error, as seen in
+the running app):
+
+![Portraits step blocked by image-model quota](screenshots/pipeline_test.png)
+
+<!-- Add more screenshots above/below this line as needed, e.g. the
+     Style/Characters steps completed live, or the `npm test` output. -->
+
 ## Stack and storage: Node/TypeScript/Express + React/Vite + JSON files
 
 Presented as a real choice, not decided by default: Node/TS/Express vs.
@@ -173,9 +245,10 @@ Real-time step updates (SSE) instead of 2-second polling — listed as a
 bonus in the spec, and the honest reason it's not here is time, not
 difficulty; the polling approach already satisfies every resumability/
 duplicate-call requirement, SSE would only remove the up-to-2-second lag in
-per-item progress reveal. Second choice would be an integration test that
-runs the full 5-step pipeline against a mocked Gemini client end-to-end
-through the actual HTTP routes (current tests cover the pipeline logic and
-the Gemini client separately, but not the routes layer stitching them
-together) — listed explicitly as "nice to have" in the spec and the
-highest-value thing not yet done.
+per-item progress reveal.
+
+(The routes-level integration test — mocked Gemini, driven through real HTTP
+requests against the Express app rather than calling `startStep()` directly
+— was originally the answer to this question, and named as such here. Added
+it afterward: `server/src/__tests__/routes.test.ts`, split `app.ts` out of
+`index.ts` so `supertest` has something to import without binding a port.)
