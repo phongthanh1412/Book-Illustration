@@ -22,6 +22,13 @@ re-testing Express or Node's `fs`.
 - `store.test.ts`: user upsert-by-email, project isolation per user, and
   that concurrent `updateProject` calls serialize instead of losing writes
   (the concurrency guarantee storage is supposed to provide at this scope).
+- `routes.test.ts`: the same mocked-Gemini happy path as `pipeline.test.ts`,
+  but driven through real HTTP requests (`supertest` against the Express
+  `app` exported from `app.ts`) instead of calling `startStep()` directly —
+  covers the wiring `pipeline.test.ts` can't see: login → create project →
+  run all 5 steps → fetch a generated image through `/api/files`, plus the
+  duplicate-run guard and ownership check (401 with no session, 404 for a
+  project owned by a different user) at the routes layer specifically.
 
 **Frontend** (`web/`, Vitest + React Testing Library): a handful of
 components/states that matter, not exhaustive coverage, per the spec's own
@@ -57,11 +64,6 @@ HTTP in a component test.
   Illustrations are blocked on the key used for testing by a `429`/quota-0
   response for every image model tried — see `DECISIONS.md` and
   `docs/architecture.md`.
-- **The Express routes layer directly** (supertest against `index.ts`) —
-  the pipeline logic underneath is tested, and the routes are thin
-  pass-throughs to it, but a routes-level integration test would catch a
-  wiring mistake the unit tests can't see. Named in `DECISIONS.md` as the
-  first thing to add with more time.
 - **Visual/CSS regressions** — judged by eye against `app-demo.html`, not
   automated.
 
@@ -74,31 +76,37 @@ then `npm test -w web`):
 > book-illustrator-server@0.1.0 test
 > vitest run
 
- ✓ src/lib/__tests__/gemini.test.ts (4 tests) 17ms
- ✓ src/lib/__tests__/store.test.ts (4 tests) 119ms
- ✓ src/lib/__tests__/pipeline.test.ts (7 tests) 383ms
+ ✓ src/lib/__tests__/gemini.test.ts (5 tests) 149ms
+ ✓ src/lib/__tests__/store.test.ts (4 tests) 717ms
+ ✓ src/lib/__tests__/pipeline.test.ts (7 tests) 1260ms
+ ✓ src/__tests__/routes.test.ts (3 tests) 1441ms
 
- Test Files  3 passed (3)
-      Tests  15 passed (15)
-   Start at  10:59:14
-   Duration  1.05s
+ Test Files  4 passed (4)
+      Tests  19 passed (19)
+   Start at  18:40:55
+   Duration  7.32s
 
 > book-illustrator-web@0.1.0 test
 > vitest run
 
- ✓ src/components/__tests__/EntityCard.test.tsx (3 tests) 90ms
- ✓ src/components/__tests__/Stepper.test.tsx (3 tests) 105ms
- ✓ src/pages/__tests__/ProjectListPage.test.tsx (3 tests) 198ms
- ✓ src/pages/__tests__/ProjectDetailPage.test.tsx (4 tests) 195ms
+ ✓ src/components/__tests__/EntityCard.test.tsx (3 tests) 475ms
+ ✓ src/components/__tests__/Stepper.test.tsx (3 tests) 460ms
+ ✓ src/pages/__tests__/ProjectListPage.test.tsx (3 tests) 829ms
+ ✓ src/pages/__tests__/ProjectDetailPage.test.tsx (4 tests) 1033ms
 
  Test Files  4 passed (4)
       Tests  13 passed (13)
-   Start at  10:59:16
-   Duration  2.14s
+   Start at  18:41:17
+   Duration  124.38s
 ```
 
-28/28 passing (15 backend, 13 frontend). The backend suite was run 12
-consecutive times before this to confirm a Windows-specific race
-(`EPERM` on concurrent file rename, see `DECISIONS.md`) was actually fixed
-rather than coincidentally not reproducing — flagging that here since a
-single green run wouldn't have caught it either.
+32/32 passing (19 backend, 13 frontend). Screenshots of this run:
+
+![Backend test run — 19 passed](screenshots/test-run-server.png)
+![Frontend test run — 13 passed](screenshots/test-run-web.png)
+
+The backend suite was run 12
+consecutive times early on to confirm a Windows-specific race (`EPERM` on
+concurrent file rename, see `DECISIONS.md`) was actually fixed rather than
+coincidentally not reproducing — flagging that here since a single green
+run wouldn't have caught it either.
